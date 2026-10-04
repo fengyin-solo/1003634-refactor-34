@@ -24,6 +24,11 @@
       </span>
     </p>
 
+    <p v-if="migrationNotice" class="notice-bar">
+      <span>{{ migrationNotice }}</span>
+      <button class="link" type="button" @click="resumeMigration">从断点继续迁移</button>
+    </p>
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -55,6 +60,7 @@
             >
               {{ action }}
             </button>
+            <button class="link" type="button" @click="showLedger(row)">台账</button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -62,6 +68,30 @@
         </tr>
       </tbody>
     </table>
+
+    <section v-if="ledgerRows.length" class="ledger-panel">
+      <h3 class="panel-title">巡检台账 · {{ ledgerTitle }}</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>记录时间</th>
+            <th>动作</th>
+            <th>通行状态</th>
+            <th>巡检结果</th>
+            <th>来源</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="entry in ledgerRows" :key="entry.id">
+            <td>{{ formatTime(entry.记录时间) }}</td>
+            <td>{{ entry.动作 }}</td>
+            <td>{{ entry.通行状态 }}</td>
+            <td>{{ entry.巡检结果 || '—' }}</td>
+            <td>{{ entry.来源 }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条林区道路记录</span>
@@ -76,10 +106,13 @@ import { computed, onMounted, ref } from 'vue'
 import {
   downloadEntries,
   listEntries,
+  listRoadLedger,
+  migrateRoadTraffic,
   moduleMeta,
+  roadMigrationStatus,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import type { EntryRow, RoadLedgerEntry } from '@/data/types'
 
 const meta = moduleMeta('forestroad')
 const columns = ["道路编号", "道路名称", "起点位置", "终点位置", "道路等级", "通行宽度", "最近巡检日", "通行状态"]
@@ -91,6 +124,10 @@ const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
+const migrationNotice = ref('')
+const ledgerRows = ref<RoadLedgerEntry[]>([])
+const ledgerTitle = ref('')
+const ledgerRoadId = ref<number | null>(null)
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
@@ -122,12 +159,38 @@ function runAction(action: string, row: EntryRow) {
   reload()
 }
 
+function refreshMigration() {
+  const state = roadMigrationStatus()
+  migrationNotice.value = state.completed
+    ? ''
+    : `通行规则迁移未完成：共 ${state.total} 条路段，已回填 ${state.migrated} 条，失败 ${state.failures.length} 条，可从断点继续`
+}
+
+function resumeMigration() {
+  migrateRoadTraffic()
+  reload()
+}
+
+function showLedger(row: EntryRow) {
+  ledgerRoadId.value = Number(row.id)
+  ledgerTitle.value = `${row['道路编号'] ?? row.id} ${row['道路名称'] ?? ''}`
+  ledgerRows.value = listRoadLedger(Number(row.id))
+}
+
+function formatTime(value: string) {
+  return value ? value.replace('T', ' ').slice(0, 16) : '—'
+}
+
 function reload() {
   errorMessage.value = ''
   try {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    refreshMigration()
+    if (ledgerRoadId.value !== null) {
+      ledgerRows.value = listRoadLedger(ledgerRoadId.value)
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '林区道路列表读取失败'
   }

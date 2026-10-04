@@ -68,4 +68,10 @@ npm run build
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
+- 林区道路的通行规则收拢在 `frontend/src/data/road-traffic.ts`：行级状态与「通行状态」字段
+  永远同一次写入；每次变动先追加巡检台账（只增不改，历史巡检记录不丢）；施工与封闭互斥，
+  同一路段只接受先到的请求。
+- 存量路段在首次访问林区道路模块时自动回填：断点续跑、失败路段可重试；道路编号只读不改，
+  缺道路等级时按原巡检结果兼容。
+- 无人机巡查页会同步提示需要避让的施工/封闭路段（`listRoadAvoidances`，其他入口也可复用）。
 - 想回到初始数据：清掉浏览器里 `forest-fire-patrol:entries` 这一项，或调用 `resetModule(模块)`。

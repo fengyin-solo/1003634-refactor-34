@@ -40,6 +40,13 @@ export function listRows(key: string): EntryRow[] {
   return allRows()[key] ?? []
 }
 
+// 重新从 localStorage 读一遍并刷新缓存：动作流转前的冲突判断要用最新数据，
+// 别的页签刚写进去的改动才不会被漏掉。
+export function reloadRows(key: string): EntryRow[] {
+  cache = readStorage()
+  return cache[key] ?? []
+}
+
 export function saveRows(key: string, rows: EntryRow[]): void {
   const next = { ...allRows(), [key]: rows }
   cache = next

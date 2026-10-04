@@ -11,6 +11,16 @@
       </div>
     </header>
 
+    <section v-if="avoidances.length" class="avoid-panel">
+      <h3 class="panel-title">航线避让提醒</h3>
+      <p class="panel-desc">以下林区道路正在施工或禁止通行，规划与执行飞行路线时请同步避让。</p>
+      <ul class="avoid-list">
+        <li v-for="item in avoidances" :key="item.道路编号">
+          {{ item.道路编号 }} · {{ item.道路名称 }}（{{ item.起点位置 }} → {{ item.终点位置 }}）：{{ item.通行状态 }}
+        </li>
+      </ul>
+    </section>
+
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
@@ -71,15 +81,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
   downloadEntries,
   listEntries,
+  listRoadAvoidances,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import type { EntryRow, RoadAvoidance } from '@/data/types'
 
 const meta = moduleMeta('drone')
 const columns = ["任务编号", "飞行区域", "飞行路线", "飞手姓名", "起飞时间", "降落时间", "发现异常数", "任务状态"]
@@ -91,6 +102,7 @@ const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
+const avoidances = ref<RoadAvoidance[]>([])
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
@@ -128,10 +140,29 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    refreshAvoidances()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '无人机巡查列表读取失败'
   }
 }
 
-onMounted(reload)
+// 避让清单每次读最新数据；别的页签改了道路通行状态，storage 事件会同步刷新这里。
+function refreshAvoidances() {
+  avoidances.value = listRoadAvoidances()
+}
+
+function onStorage(event: StorageEvent) {
+  if (!event.key || event.key.includes('forest-fire-patrol')) {
+    refreshAvoidances()
+  }
+}
+
+onMounted(() => {
+  reload()
+  window.addEventListener('storage', onStorage)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('storage', onStorage)
+})
 </script>
