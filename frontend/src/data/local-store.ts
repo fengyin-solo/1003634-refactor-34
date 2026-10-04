@@ -4,6 +4,9 @@ import type { EntryRow } from './types'
 // 本地持久化：数据放在 localStorage 里，刷新、关掉再打开都还在。
 const STORAGE_KEY = 'forest-fire-patrol:entries'
 
+// 数据变更事件：同一标签页内各入口（如无人机航线提醒）靠它同步刷新。
+export const ENTRIES_CHANGED_EVENT = 'forest-fire-patrol:entries-changed'
+
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
@@ -40,11 +43,18 @@ export function listRows(key: string): EntryRow[] {
   return allRows()[key] ?? []
 }
 
+// 丢掉内存缓存强制重读持久层：并发先到者优先的校验要以最新落盘数据为准。
+export function refreshRows(key: string): EntryRow[] {
+  cache = readStorage()
+  return cache[key] ?? []
+}
+
 export function saveRows(key: string, rows: EntryRow[]): void {
   const next = { ...allRows(), [key]: rows }
   cache = next
   if (typeof window !== 'undefined' && window.localStorage) {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    window.dispatchEvent(new CustomEvent(ENTRIES_CHANGED_EVENT, { detail: { key } }))
   }
 }
 

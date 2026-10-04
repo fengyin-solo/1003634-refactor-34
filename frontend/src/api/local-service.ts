@@ -1,6 +1,10 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { runForestRoadAction } from '@/data/road-traffic'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
+
+// 林区道路的通行规则已收拢到 data/road-traffic.ts，页面统一从这里调。
+export { listRoadClosureNotices, listRoadLedger, migrateForestRoads } from '@/data/road-traffic'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
@@ -29,6 +33,10 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
 }
 
 export function runAction(key: string, id: number, action: string): ActionResult {
+  if (key === 'forestroad') {
+    // 林区道路走统一通行规则：台账、并发先到者优先都在那一处
+    return runForestRoadAction(id, action)
+  }
   const meta = moduleMeta(key)
   const target = meta.actionTargets[action]
   if (!target) {

@@ -7,6 +7,7 @@
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记林区道路</button>
+        <button class="btn" type="button" @click="runMigration">回填存量路段</button>
         <button class="btn" type="button" @click="exportRows">导出林区道路清单</button>
       </div>
     </header>
@@ -55,6 +56,7 @@
             >
               {{ action }}
             </button>
+            <button class="link" type="button" @click="showLedger(row)">巡检台账</button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -65,6 +67,8 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条林区道路记录</span>
+      <span v-if="migrationMessage" class="muted-text">{{ migrationMessage }}</span>
+      <span v-if="ledgerMessage" class="muted-text">{{ ledgerMessage }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -76,6 +80,8 @@ import { computed, onMounted, ref } from 'vue'
 import {
   downloadEntries,
   listEntries,
+  listRoadLedger,
+  migrateForestRoads,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
@@ -90,6 +96,8 @@ const stats = [{"label": "道路总里程", "value": 0}, {"label": "需维护段
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const migrationMessage = ref('')
+const ledgerMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
@@ -112,8 +120,35 @@ function openCreate() {
   errorMessage.value = '林区道路登记入口尚未接入审批流'
 }
 
+// 存量回填：断点续迁，失败路段（如缺道路编号）不进断点，补登后重跑从断点继续。
+function runMigration() {
+  errorMessage.value = ''
+  ledgerMessage.value = ''
+  const result = migrateForestRoads()
+  if (result.failed.length) {
+    const detail = result.failed.map((item) => `记录${item.id}（${item.message}）`).join('、')
+    migrationMessage.value = `存量回填未全部完成：${detail}；已迁移 ${result.migrated} 条，补登道路编号后重跑可从断点继续`
+  } else {
+    const resume = result.resumedFrom !== null ? `，从断点记录 ${result.resumedFrom} 继续` : ''
+    migrationMessage.value = `存量回填完成：本次迁移 ${result.migrated} 条、跳过 ${result.skipped} 条、共 ${result.total} 条${resume}`
+  }
+  reload()
+}
+
+function showLedger(row: EntryRow) {
+  errorMessage.value = ''
+  const roadNo = String(row['道路编号'] ?? '')
+  const entries = listRoadLedger(roadNo)
+  ledgerMessage.value = entries.length
+    ? `${roadNo} 巡检台账：${entries
+        .map((entry) => `${entry.时间} ${entry.动作}→${entry.结果}（${entry.备注}）`)
+        .join('；')}`
+    : `${roadNo} 暂无巡检台账记录`
+}
+
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
+  ledgerMessage.value = ''
   const result = applyAction(meta.key, Number(row.id), action)
   if (!result.ok) {
     errorMessage.value = result.message
@@ -133,5 +168,8 @@ function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  // 进页面先补跑存量回填：没跑过就全量跑，跑过就跳过，中断过就从断点继续
+  runMigration()
+})
 </script>

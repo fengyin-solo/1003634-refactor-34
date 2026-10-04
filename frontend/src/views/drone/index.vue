@@ -24,6 +24,14 @@
       </span>
     </p>
 
+    <div v-if="closureNotices.length" class="notice-bar">
+      <strong>航线避让提醒：</strong>
+      <span v-for="notice in closureNotices" :key="notice.id" class="notice-item">
+        {{ notice.道路编号 }} {{ notice.道路名称 }}（{{ notice.status }}）
+      </span>
+      <span class="notice-tip">以上林区道路施工/封闭，请同步调整航线避让</span>
+    </div>
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -38,6 +46,7 @@
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
           <th>当前状态</th>
+          <th>航线提醒</th>
           <th>可执行动作</th>
         </tr>
       </thead>
@@ -45,6 +54,12 @@
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td>{{ row.status }}</td>
+          <td>
+            <span v-if="matchedNotice(row)" class="avoid-badge">
+              需避让 {{ matchedNotice(row)?.道路编号 }}
+            </span>
+            <span v-else>—</span>
+          </td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -58,7 +73,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无无人机巡查数据，可先登记无人机巡查任务</td>
+          <td :colspan="columns.length + 3" class="empty-state">暂无无人机巡查数据，可先登记无人机巡查任务</td>
         </tr>
       </tbody>
     </table>
@@ -71,15 +86,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
   downloadEntries,
   listEntries,
+  listRoadClosureNotices,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import { ENTRIES_CHANGED_EVENT } from '@/data/local-store'
+import type { EntryRow, RoadClosureNotice } from '@/data/types'
 
 const meta = moduleMeta('drone')
 const columns = ["任务编号", "飞行区域", "飞行路线", "飞手姓名", "起飞时间", "降落时间", "发现异常数", "任务状态"]
@@ -90,6 +107,7 @@ const stats = [{"label": "今日飞行任务", "value": 0}, {"label": "已完成
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const closureNotices = ref<RoadClosureNotice[]>([])
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
@@ -133,5 +151,42 @@ function reload() {
   }
 }
 
-onMounted(reload)
+// 林区道路施工/封闭一变动（任何入口），避让提醒同步刷新
+function loadClosureNotices() {
+  closureNotices.value = listRoadClosureNotices()
+}
+
+function onEntriesChanged(event: Event) {
+  if ((event as CustomEvent<{ key?: string }>).detail?.key === 'forestroad') {
+    loadClosureNotices()
+  }
+}
+
+function onStorage(event: StorageEvent) {
+  if (event.key === 'forest-fire-patrol:entries') {
+    loadClosureNotices()
+  }
+}
+
+// 飞行区域/路线里提到施工、封闭路段的名称或编号，就标「需避让」
+function matchedNotice(row: EntryRow): RoadClosureNotice | null {
+  const text = `${row['飞行区域'] ?? ''}${row['飞行路线'] ?? ''}`
+  return (
+    closureNotices.value.find((notice) =>
+      [notice.道路名称, notice.道路编号].some((token) => token && text.includes(token)),
+    ) ?? null
+  )
+}
+
+onMounted(() => {
+  reload()
+  loadClosureNotices()
+  window.addEventListener(ENTRIES_CHANGED_EVENT, onEntriesChanged)
+  window.addEventListener('storage', onStorage)
+})
+
+onUnmounted(() => {
+  window.removeEventListener(ENTRIES_CHANGED_EVENT, onEntriesChanged)
+  window.removeEventListener('storage', onStorage)
+})
 </script>
